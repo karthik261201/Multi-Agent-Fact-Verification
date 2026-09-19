@@ -1,0 +1,29 @@
+# Virtual Environment
+venv/
+.venv/
+
+# Environment variables / API Keys
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Jupyter
+.ipynb_checkpoints/
+
+# macOS
+.DS_Store
+
+# VS Code
+.vscode/
+
+# PyCharm
+.idea/
+
+# Logs
+*.log
+
+# Generated/cache files
+.cache/
