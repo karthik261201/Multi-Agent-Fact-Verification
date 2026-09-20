@@ -15,7 +15,7 @@ class SearchQuery(BaseModel):
     query: str = Field(min_length=1)
 
 
-# The complete response returned by the Claim Agent.
+# The detailed internal response returned by the Claim Agent.
 class ClaimAnalysis(BaseModel):
     original_claim: str = Field(min_length=1)
 
@@ -23,6 +23,10 @@ class ClaimAnalysis(BaseModel):
     status: Literal["ready", "needs_clarification"]
 
     entities: list[str]
+
+    # Actions, properties, dates, and important qualifiers.
+    keywords: list[str]
+
     subclaims: list[Subclaim]
     ambiguities: list[str]
     search_queries: list[SearchQuery]
