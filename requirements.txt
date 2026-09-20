@@ -35,3 +35,6 @@ streamlit
 
 # Utilities
 pydantic
+
+# Chat interface
+chainlit
