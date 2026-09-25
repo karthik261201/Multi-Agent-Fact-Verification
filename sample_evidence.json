@@ -1,0 +1,23 @@
+{
+  "claim": "OpenAI is losing money on its ChatGPT Pro subscription plan.",
+  "evidence": [
+    {
+      "relevance": 0.429,
+      "title": "OpenAI is losing money on its pricey ChatGPT Pro plan, CEO Sam Altman says",
+      "url": "https://finance.yahoo.com/news/openai-losing-money-chatgpt-pro-plan-chatgpt-045857.html",
+      "snippet": "OpenAI CEO Sam Altman said the company is currently losing money on its $200-a-month ChatGPT Pro subscription tier, saying that some subscribers are using the product far more heavily than the company originally modeled for."
+    },
+    {
+      "relevance": 0.423,
+      "title": "OpenAI CEO Sam Altman says the company is losing money on its $200 ChatGPT Pro plan",
+      "url": "https://finance.yahoo.com/news/openai-ceo-sam-altman-says-042336.html",
+      "snippet": "Altman noted that even though the Pro tier is priced well above the standard plan, heavy usage by a subset of users has made the tier unprofitable for the company so far."
+    },
+    {
+      "relevance": 0.391,
+      "title": "OpenAI reportedly expected losses of about $5 billion on revenue of $3.7 billion this year",
+      "url": "https://finance.yahoo.com/news/openai-expected-losses-5-billion-2024.html",
+      "snippet": "Reports indicate OpenAI expects steep losses this year even as revenue grows quickly, with projections suggesting the company will not be profitable until around 2029, as it continues to invest heavily in compute and research."
+    }
+  ]
+}
