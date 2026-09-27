@@ -37,3 +37,6 @@ streamlit
 pydantic
 
 tavily-python
+
+# Chat interface
+chainlit

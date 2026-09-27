@@ -19,6 +19,12 @@ __pycache__/
 # VS Code
 .vscode/
 
+# Generated Chainlit translations
+.chainlit/translations/
+
+# Local Chainlit uploads
+.files/
+
 # PyCharm
 .idea/
 

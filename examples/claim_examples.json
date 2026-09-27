@@ -1,0 +1,31 @@
+[
+  {
+    "input": "Chandrayaan-3 was launched by ISRO in July 2023.",
+    "expected_output": {
+      "original_claim": "Chandrayaan-3 was launched by ISRO in July 2023.",
+      "status": "ready",
+      "entities": ["Chandrayaan-3", "ISRO"],
+      "subclaims": [
+        {
+          "id": "c1",
+          "text": "Chandrayaan-3 was launched by ISRO."
+        },
+        {
+          "id": "c2",
+          "text": "Chandrayaan-3 was launched in July 2023."
+        }
+      ],
+      "ambiguities": [],
+      "search_queries": [
+        {
+          "subclaim_id": "c1",
+          "query": "Chandrayaan-3 launching organization"
+        },
+        {
+          "subclaim_id": "c2",
+          "query": "Chandrayaan-3 launch date"
+        }
+      ]
+    }
+  }
+]
