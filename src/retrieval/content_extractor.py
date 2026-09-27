@@ -39,18 +39,3 @@ def extract_content(url):
         print("Reason:", error)
 
         return None
-
-
-if __name__ == "__main__":
-
-    # Replace this with one URL returned by web_search.py.
-    test_url = "https://science.nasa.gov/mission/chandrayaan-3"
-
-    content = extract_content(test_url)
-
-    if content:
-        # Only print the first 2000 characters while testing.
-        print(content[:2000])
-
-    else:
-        print("Could not extract content.")

@@ -46,18 +46,3 @@ def search_web(query, max_results=5):
             "snippet": result.get("content", "")
         })
     return results
-
-
-# This block runs only when this file is executed directly.
-# It is useful while testing this module independently.
-if __name__ == "__main__":
-
-    test_query = "Chandrayaan-3 launch date ISRO"
-
-    search_results = search_web(test_query)
-
-    for index, result in enumerate(search_results, start=1):
-        print(f"\n--- Result {index} ---")
-        print("Title:", result["title"])
-        print("URL:", result["url"])
-        print("Snippet:", result["snippet"])

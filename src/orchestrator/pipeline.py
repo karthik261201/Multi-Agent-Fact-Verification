@@ -147,25 +147,13 @@ def run_pipeline(user_claim: str):
 
     print("Verdict:", verification_result.verdict)
 
-    print(
-        "Confidence:",
-        verification_result.confidence
-    )
+    print("Confidence:", verification_result.confidence)
 
-    print(
-        "Supporting Evidence:",
-        verification_result.supporting_evidence_ids
-    )
+    print("Supporting Evidence:", verification_result.supporting_evidence_ids)
 
-    print(
-        "Contradicting Evidence:",
-        verification_result.contradicting_evidence_ids
-    )
+    print("Contradicting Evidence:", verification_result.contradicting_evidence_ids)
 
-    print(
-        "Explanation:",
-        verification_result.explanation
-    )
+    print("Explanation:", verification_result.explanation)
 
     # =========================================================
     # RETURN PIPELINE RESULTS

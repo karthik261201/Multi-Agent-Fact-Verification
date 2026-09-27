@@ -59,39 +59,3 @@ def rank_evidence(claim, passages, top_k=5):
 
     # Return only the strongest evidence.
     return ranked_passages[:top_k]
-
-
-if __name__ == "__main__":
-
-    test_claim = (
-        "Chandrayaan-3 was launched in July 2023."
-    )
-
-    test_passages = [
-        {
-            "text":
-                "Chandrayaan-3 was launched on "
-                "July 14, 2023.",
-            "url": "source1"
-        },
-
-        {
-            "text":
-                "The Indian cricket team played "
-                "a match yesterday.",
-            "url": "source2"
-        },
-
-        {
-            "text":
-                "The Chandrayaan-3 mission was "
-                "launched by ISRO in 2023.",
-            "url": "source3"
-        }
-    ]
-
-    ranked = rank_evidence(test_claim, test_passages)
-
-    for evidence in ranked:
-        print("\nScore:", evidence["relevance_score"])
-        print("Text:", evidence["text"])

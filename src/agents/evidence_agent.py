@@ -65,29 +65,3 @@ def retrieve_evidence(claim, search_queries, max_results_per_query=3, top_k=5):
         "claim": claim,
         "evidence": top_evidence
     }
-
-
-if __name__ == "__main__":
-
-    # For now we manually provide what the Claim Agent will eventually send us.
-    test_claim = (
-        "ChatGPT is in loss."
-    )
-
-    test_queries = [
-        "OpenAI ChatGPT profit or loss financial performance",
-        "OpenAI ChatGPT revenue losses profitability"
-    ]
-
-    evidence = retrieve_evidence(test_claim, test_queries)
-
-    print("\n\n========== TOP EVIDENCE ==========")
-
-    print("\nClaim:", evidence["claim"])
-
-    for index, item in enumerate(evidence["evidence"], start=1):
-        print(f"\nEvidence {index}")
-        print("Relevance:", round(item["relevance_score"], 3))
-        print("Title:", item["title"])
-        print("URL:", item["url"])
-        print("Text:", item["text"])

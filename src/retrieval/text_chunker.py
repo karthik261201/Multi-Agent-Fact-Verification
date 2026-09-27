@@ -33,29 +33,3 @@ def chunk_text(text, chunk_size=120):
             chunks.append(chunk)
 
     return chunks
-
-
-if __name__ == "__main__":
-
-    test_text = """
-    Chandrayaan-3
-
-                                                        Active Mission
-
-
-Chandrayaan-3 is an Indian Space Research Organization mission that landed near the south pole of the Moon on Aug. 23, 2023. The mission includes a lander and a rover. India plans to demonstrate end-to-end landing and roving capabilities.
-Type
-Launch
-Target
-Objective
-Webb is the premier observatory of the next decade, serving thousands of astronomers worldwide. It studies every phase in the…
-This rover and its aerial sidekick were assigned to study the geology of Mars and seek signs of ancient microbial…
-On a mission to “touch the Sun,” NASA's Parker Solar Probe became the first spacecraft to fly through the corona…
-NASA’s Juno spacecraft entered orbit around Jupiter in 2016, the first explorer to peer below the planet's dense clouds to
-    """
-
-    chunks = chunk_text(test_text, chunk_size=10)
-
-    for index, chunk in enumerate(chunks, start=1):
-        print(f"\n--- Chunk {index} ---")
-        print(chunk)
