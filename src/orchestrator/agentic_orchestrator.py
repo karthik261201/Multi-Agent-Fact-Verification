@@ -22,15 +22,101 @@ Later:
     - Add more intelligent orchestration decisions
 """
 
+import json
+from groq import Groq
+
 from src.agents.claim_agent import analyze_claim
 from src.agents.evidence_agent import retrieve_evidence
 from src.agents.verification_agent import (prepare_evidence, call_verification_model)
 
+def generate_retry_queries(claim, previous_queries, verification_explanation):
+    """
+    Generate improved search queries when the previous
+    evidence retrieval attempt was insufficient.
+
+    The orchestrator uses:
+        1. Original claim
+        2. Previous search queries
+        3. Verification Agent's explanation
+
+    to decide how retrieval should be improved.
+    """
+
+    client = Groq()
+
+    prompt = f"""
+        You are controlling the evidence retrieval strategy of a
+        fact-verification system.
+
+        The previous evidence retrieval attempt was insufficient.
+
+        ORIGINAL CLAIM:
+        {claim}
+
+        PREVIOUS SEARCH QUERIES:
+        {json.dumps(previous_queries, indent=2)}
+
+        WHY THE EVIDENCE WAS INSUFFICIENT:
+        {verification_explanation}
+
+        Generate improved web search queries that are more specific
+        to the original claim and address the missing evidence.
+
+        Rules:
+        - Generate 2 to 4 queries.
+        - Preserve important entities, dates, events, and qualifiers from the original claim.
+        - Do not assume the claim is true.
+        - Queries must be neutral.
+        - Do not simply repeat the previous queries.
+        - Focus specifically on information missing from the previous evidence.
+        - Return ONLY valid JSON.
+
+        Required format:
+
+        {{
+            "queries": [
+                "query 1",
+                "query 2"
+            ]
+        }}
+    """
+
+    response = client.chat.completions.create(
+        model="openai/gpt-oss-120b",
+        temperature=0,
+        max_tokens=500,
+        messages=[
+            {"role": "user", "content": prompt}
+        ]
+    )
+
+    # Read the model response.
+    text = response.choices[0].message.content.strip()
+
+    # Remove Markdown code fences if the model adds them.
+    if text.startswith("```"):
+        text = text.strip("`")
+
+        if text.startswith("json"):
+            text = text[4:].strip()
+
+    # Convert the JSON response into a Python dictionary.
+    data = json.loads(text)
+
+    new_queries = data.get("queries", [])
+
+    # Remove empty queries.
+    new_queries = [
+        query.strip()
+        for query in new_queries
+        if query.strip()
+    ]
+
+    return new_queries
 
 # Maximum number of evidence retrieval attempts.
 # This prevents the orchestrator from entering an infinite loop.
 MAX_RETRIES = 2
-
 
 def run_agentic_orchestrator(user_claim: str):
     """
@@ -176,12 +262,25 @@ def run_agentic_orchestrator(user_claim: str):
                     "Orchestrator decision: "
                     "retry evidence retrieval."
                 )
+                
+                new_queries = generate_retry_queries(
+                    claim=analysis.original_claim,
+                    previous_queries=search_queries,
+                    verification_explanation=(
+                        verification_result.explanation
+                    )
+                )
 
-                # IMPORTANT:
-                # Version 1 uses the same search queries.
-                #
-                # In the next version, the orchestrator
-                # will generate improved/reformulated queries.
+                print("\nPrevious Search Queries:")
+                for query in search_queries:
+                    print("-", query)
+
+                print("\nImproved Search Queries:")
+                for query in new_queries:
+                    print("-", query)
+
+                if new_queries:
+                    search_queries = new_queries
 
             else:
 
