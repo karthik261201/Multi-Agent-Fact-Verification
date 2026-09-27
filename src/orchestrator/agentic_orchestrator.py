@@ -7,39 +7,43 @@ Controls the multi-agent fact-verification workflow.
 Unlike pipeline.py, which follows a fixed sequence,
 this orchestrator can make decisions based on agent outputs.
 
-Version 1:
+Current capabilities:
     - Run Claim Agent
     - Run Evidence Agent
     - Run Verification Agent
-    - If verdict is SUPPORTED or REFUTED -> stop
-    - If verdict is INSUFFICIENT -> retry evidence retrieval
-    - Stop after a maximum number of attempts
-
-Later:
-    - Generate improved search queries for retries
-    - Evaluate evidence sufficiency before verification
-    - Preserve subclaim-to-evidence mapping
-    - Add more intelligent orchestration decisions
+    - Stop when evidence supports/refutes the claim
+    - Retry when evidence is insufficient
+    - Generate improved search queries for retry
+    - Preserve subclaim/query provenance during
+      the initial evidence retrieval
 """
 
 import json
+
 from groq import Groq
 
 from src.agents.claim_agent import analyze_claim
 from src.agents.evidence_agent import retrieve_evidence
 from src.agents.verification_agent import (prepare_evidence, call_verification_model)
 
+# Maximum number of evidence retrieval attempts.
+MAX_RETRIES = 2
+
+# ============================================================
+# RETRY QUERY GENERATION
+# ============================================================
+
 def generate_retry_queries(claim, previous_queries, verification_explanation):
     """
     Generate improved search queries when the previous
     evidence retrieval attempt was insufficient.
 
-    The orchestrator uses:
+    Uses:
         1. Original claim
         2. Previous search queries
         3. Verification Agent's explanation
 
-    to decide how retrieval should be improved.
+    to improve the next retrieval attempt.
     """
 
     client = Groq()
@@ -114,9 +118,9 @@ def generate_retry_queries(claim, previous_queries, verification_explanation):
 
     return new_queries
 
-# Maximum number of evidence retrieval attempts.
-# This prevents the orchestrator from entering an infinite loop.
-MAX_RETRIES = 2
+# ============================================================
+# AGENTIC ORCHESTRATOR
+# ============================================================
 
 def run_agentic_orchestrator(user_claim: str):
     """
@@ -139,22 +143,31 @@ def run_agentic_orchestrator(user_claim: str):
 
     print("\nSubclaims:")
     for subclaim in analysis.subclaims:
-        print(f"{subclaim.id}: {subclaim.text}")
+        print(
+            f"{subclaim.id}: "
+            f"{subclaim.text}"
+        )
 
     print("\nSearch Queries:")
     for search in analysis.search_queries:
-        print(f"{search.subclaim_id}: {search.query}")
+        print(
+            f"{search.subclaim_id}: "
+            f"{search.query}"
+        )
 
     # ========================================================
     # STEP 2: HANDLE AMBIGUOUS CLAIMS
     # ========================================================
 
-    # If Agent 1 cannot clearly understand the claim,
-    # the orchestrator should not continue blindly.
     if analysis.status == "needs_clarification":
 
-        print("\n========== ORCHESTRATOR DECISION ==========")
-        print("Claim requires clarification.")
+        print(
+            "\n========== ORCHESTRATOR DECISION =========="
+        )
+
+        print(
+            "Claim requires clarification."
+        )
 
         print("\nAmbiguities:")
         for ambiguity in analysis.ambiguities:
@@ -163,6 +176,7 @@ def run_agentic_orchestrator(user_claim: str):
         return {
             "status": "needs_clarification",
             "analysis": analysis,
+            "evidence_result": None,
             "verification_result": None
         }
 
@@ -170,9 +184,14 @@ def run_agentic_orchestrator(user_claim: str):
     # STEP 3: PREPARE INITIAL SEARCH QUERIES
     # ========================================================
 
-    search_queries = [search.query for search in analysis.search_queries]
-
-    # Keep track of the latest results.
+    # IMPORTANT:
+    #
+    # Previously we converted SearchQuery objects into strings.
+    #
+    # Now we preserve the complete objects so that the
+    # Evidence Agent knows which query belongs to which
+    # subclaim.
+    search_queries = analysis.search_queries
     evidence_result = None
     verification_result = None
 
@@ -180,8 +199,6 @@ def run_agentic_orchestrator(user_claim: str):
     # STEP 4: AGENTIC RETRY LOOP
     # ========================================================
 
-    # Attempt 1 = initial retrieval
-    # Attempt 2 = retry if evidence was insufficient
     for attempt in range(1, MAX_RETRIES + 1):
 
         print(
@@ -205,9 +222,26 @@ def run_agentic_orchestrator(user_claim: str):
             "evidence item(s)."
         )
 
-        # ----------------------------------------------------
-        # PREPARE EVIDENCE FOR AGENT 3
-        # ----------------------------------------------------
+        # ====================================================
+        # DISPLAY EVIDENCE PROVENANCE
+        # ====================================================
+
+        # This allows us to verify that each evidence item
+        # remembers which subclaim/query retrieved it.
+        print("\nEvidence Provenance:")
+
+        for index, item in enumerate(evidence_result["evidence"], start=1):
+            print(
+                f"[{index}] "
+                f"Subclaim: "
+                f"{item.get('subclaim_id')} | "
+                f"Query: "
+                f"{item.get('query')}"
+            )
+
+        # ====================================================
+        # PREPARE EVIDENCE FOR VERIFICATION AGENT
+        # ====================================================
 
         verification_evidence = prepare_evidence(evidence_result["evidence"])
 
@@ -234,8 +268,9 @@ def run_agentic_orchestrator(user_claim: str):
 
         print("\n========== ORCHESTRATOR DECISION ==========")
 
-        # If the evidence clearly supports or refutes
-        # the claim, verification is complete.
+        # ----------------------------------------------------
+        # SUFFICIENT EVIDENCE
+        # ----------------------------------------------------
         if verification_result.verdict in ["SUPPORTED", "REFUTED"]:
 
             print(
@@ -262,17 +297,41 @@ def run_agentic_orchestrator(user_claim: str):
                     "Orchestrator decision: "
                     "retry evidence retrieval."
                 )
-                
+
+                # --------------------------------------------
+                # PREPARE PREVIOUS QUERIES
+                # --------------------------------------------
+
+                # search_queries may contain:
+                #
+                # - SearchQuery objects
+                # - plain strings from an earlier retry
+                #
+                # Convert both forms into strings before
+                # sending them to the retry-query generator.
+                previous_query_strings = [
+                    search.query
+                    if hasattr(search, "query")
+                    else search
+                    for search in search_queries
+                ]
+
+                # --------------------------------------------
+                # GENERATE IMPROVED QUERIES
+                # --------------------------------------------
+
                 new_queries = generate_retry_queries(
                     claim=analysis.original_claim,
-                    previous_queries=search_queries,
+                    previous_queries=(
+                        previous_query_strings
+                    ),
                     verification_explanation=(
                         verification_result.explanation
                     )
                 )
 
                 print("\nPrevious Search Queries:")
-                for query in search_queries:
+                for query in previous_query_strings:
                     print("-", query)
 
                 print("\nImproved Search Queries:")
@@ -310,7 +369,10 @@ def run_agentic_orchestrator(user_claim: str):
 
     print("Explanation:",verification_result.explanation)
 
-    # Return everything so that a future UI can consume it.
+    # ========================================================
+    # RETURN COMPLETE RESULT
+    # ========================================================
+
     return {
         "status": "completed",
         "analysis": analysis,
