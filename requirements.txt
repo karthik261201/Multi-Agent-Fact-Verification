@@ -40,3 +40,5 @@ tavily-python
 
 # Chat interface
 chainlit
+
+groq>=0.11.0

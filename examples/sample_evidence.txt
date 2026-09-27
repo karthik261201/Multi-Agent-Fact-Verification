@@ -1,0 +1,17 @@
+Evidence 3
+Relevance: 0.429
+Title: OpenAI is losing money on its pricey ChatGPT Pro plan, CEO Sam Altman says
+URL: https://finance.yahoo.com/news/openai-losing-money-chatgpt-pro-plan-chatgpt-045857.html
+Altman said the company is currently losing money on its $200-a-month Pro tier because a subset of subscribers are using the product far more heavily than the company had originally modeled for.
+
+Evidence 4
+Relevance: 0.423
+Title: OpenAI CEO Sam Altman says the company is losing money on its $200 ChatGPT Pro plan
+URL: https://finance.yahoo.com/news/openai-ceo-sam-altman-says-042336.html
+Altman noted the Pro tier is priced well above the standard plan, yet heavy usage by some users has made it unprofitable for the company so far.
+
+Evidence 5
+Relevance: 0.391
+Title: OpenAI reportedly expected losses of about $5 billion on revenue of $3.7 billion this year
+URL: https://finance.yahoo.com/news/openai-expected-losses-5-billion-2024.html
+Reports indicate OpenAI expects steep losses this year even as revenue grows quickly, with projections suggesting the company will not be profitable until around 2029, as it continues investing heavily in compute and research.
