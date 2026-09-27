@@ -36,5 +36,7 @@ streamlit
 # Utilities
 pydantic
 
+tavily-python
+
 # Chat interface
 chainlit
