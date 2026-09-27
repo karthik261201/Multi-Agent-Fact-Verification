@@ -2,7 +2,7 @@ import json
 
 import requests
 
-from schemas.claim_analysis import ClaimAnalysis
+from src.schemas.claim_analysis import ClaimAnalysis
 
 
 # Instructions that define the Claim Agent's responsibility.
