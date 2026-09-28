@@ -119,45 +119,94 @@ def prepare_evidence(evidence_items):
 # ============================================================
 
 SYSTEM_PROMPT = """
-    You are the Verification Agent in a multi-agent fact-checking pipeline.
+    You are the Verification Agent in an evidence-grounded
+    fact-verification system.
 
     You receive:
-    1. A CLAIM
-    2. Evidence retrieved by a separate Evidence Retrieval Agent
+    1. A claim or subclaim.
+    2. Retrieved evidence passages.
 
-    Your job is ONLY to determine whether the provided evidence
-    supports, refutes, or is insufficient to establish the claim.
+    Your task is to determine whether the supplied evidence
+    SUPPORTS, REFUTES, or is INSUFFICIENT to determine the claim.
 
-    Rules:
+    IMPORTANT GROUNDING RULES:
 
-    - Base your verdict strictly on the provided evidence.
-    - Do not use outside knowledge to invent facts.
-    - Do not search for additional information.
+    - Judge ONLY from the supplied evidence.
+    - Do NOT use outside knowledge.
+    - Do NOT invent facts.
+    - Do NOT search for additional information.
+    - Every supporting or contradicting evidence ID must refer to evidence actually provided to you.
 
-    Verdicts:
+    VERDICT RULES:
 
-    SUPPORTED:
-    The provided evidence clearly supports the claim.
+    SUPPORTED: Use this only when the supplied evidence clearly supports the claim.
 
-    REFUTED:
-    The provided evidence clearly contradicts the claim.
+    REFUTED: Use REFUTED only when the supplied evidence directly
+    establishes that the claim cannot be true.A different date, event, property, 
+    person, organization, or value does NOT automatically contradict the claim unless
+    the evidence establishes that the alternatives are mutually exclusive.
 
-    INSUFFICIENT:
-    The evidence is irrelevant, too weak, incomplete, or does not
-    clearly establish whether the claim is correct.
+    INSUFFICIENT: Use this when the evidence is missing, weak, irrelevant, ambiguous, 
+    incomplete, or does not clearly establish either support or contradiction.
 
-    Additional rules:
+    CRITICAL RULE ABOUT ABSENCE OF EVIDENCE:
 
-    - Consider all provided evidence.
-    - Note contradictions between evidence items.
-    - Identify which evidence IDs support the claim.
-    - Identify which evidence IDs contradict the claim.
-    - Provide a short explanation grounded in the evidence.
-    - Confidence must be between 0.0 and 1.0.
+    The absence of supporting evidence is NOT itself evidence
+    that a claim is false.
 
-    Respond ONLY with valid JSON.
+    If the supplied evidence simply does not mention the claimed
+    event, property, date, relationship, or fact, you MUST NOT
+    treat that omission alone as contradiction.
 
-    Required format:
+    For REFUTED, there must be supplied evidence that directly
+    contradicts the claim or establishes an incompatible fact.
+
+    Do not infer contradiction merely because evidence provides
+    a different date, value, event, or attribute.
+
+    Before returning REFUTED, ask:
+
+    "Can the claim and this evidence both reasonably be true?"
+
+    If YES, the evidence is not a direct contradiction.
+
+    If the evidence does not otherwise establish the claim,
+    return INSUFFICIENT.
+
+    Example:
+
+    Claim: "The monument was painted in January 2025."
+
+    Evidence: "The monument is scheduled to be repainted in 2026."
+
+    This alone is NOT sufficient to refute the claim because
+    painting in 2025 and repainting in 2026 could both occur.
+    Return INSUFFICIENT unless the evidence establishes that
+    no painting occurred in January 2025.
+
+    Claim: "Organization A launched the spacecraft."
+
+    Evidence: "The spacecraft was launched by Organization B."
+
+    If the evidence clearly identifies Organization B as the
+    launching organization for that specific launch, this is
+    directly incompatible with Organization A being the launching
+    organization and may be REFUTED.
+
+    EVIDENCE ID RULES:
+
+    - supporting_evidence_ids must contain only evidence that directly supports the claim.
+    - contradicting_evidence_ids must contain only evidence that directly contradicts the claim.
+    - Never invent an evidence ID.
+    - The same evidence ID must not appear in both lists.
+
+    CONFIDENCE:
+
+    Return a confidence value between 0.0 and 1.0.
+
+    OUTPUT:
+
+    Return ONLY valid JSON in exactly this structure:
 
     {
         "verdict": "SUPPORTED",
@@ -166,6 +215,11 @@ SYSTEM_PROMPT = """
         "contradicting_evidence_ids": [],
         "explanation": "Evidence [1] and [2] directly support the claim."
     }
+
+    Allowed verdicts:
+    SUPPORTED
+    REFUTED
+    INSUFFICIENT
 """
 
 # ============================================================
@@ -197,6 +251,166 @@ def build_user_prompt(claim, evidence):
         EVIDENCE: {evidence_text}
     """
 
+def validate_verification_output(data,evidence):
+    """
+    Deterministically validate the Verification Agent's
+    LLM-generated JSON before accepting it.
+
+    This protects the pipeline from:
+    - invalid verdicts
+    - invalid confidence values
+    - hallucinated evidence IDs
+    - duplicate IDs
+    - evidence appearing as both support and contradiction
+    - missing explanations
+    """
+
+    # ========================================================
+    # VALID VERDICTS
+    # ========================================================
+
+    valid_verdicts = {
+        "SUPPORTED",
+        "REFUTED",
+        "INSUFFICIENT"
+    }
+
+    verdict = data.get("verdict")
+
+    if verdict not in valid_verdicts:
+        raise ValueError(
+            f"Invalid verification verdict: {verdict}"
+        )
+
+    # ========================================================
+    # VALIDATE CONFIDENCE
+    # ========================================================
+
+    confidence = data.get("confidence")
+
+    if not isinstance(confidence,(int, float)):
+        raise ValueError(
+            "Verification confidence must be numeric."
+        )
+
+    if not 0.0 <= confidence <= 1.0:
+        raise ValueError(
+            "Verification confidence must be between "
+            "0.0 and 1.0."
+        )
+
+    # ========================================================
+    # GET EVIDENCE IDS
+    # ========================================================
+
+    supporting_ids = data.get("supporting_evidence_ids",[])
+
+    contradicting_ids = data.get("contradicting_evidence_ids",[])
+
+    if not isinstance(supporting_ids, list):
+        raise ValueError(
+            "supporting_evidence_ids must be a list."
+        )
+
+    if not isinstance(contradicting_ids, list):
+        raise ValueError(
+            "contradicting_evidence_ids must be a list."
+        )
+
+    # ========================================================
+    # MAKE SURE IDS ARE INTEGERS
+    # ========================================================
+
+    if not all(isinstance(item, int) for item in supporting_ids):
+        raise ValueError(
+            "All supporting evidence IDs must be integers."
+        )
+
+    if not all(isinstance(item, int) for item in contradicting_ids):
+        raise ValueError(
+            "All contradicting evidence IDs must be integers."
+        )
+
+    # ========================================================
+    # REMOVE DUPLICATES
+    # ========================================================
+
+    supporting_ids = list(dict.fromkeys(supporting_ids))
+
+    contradicting_ids = list(dict.fromkeys(contradicting_ids))
+
+    # ========================================================
+    # CHECK THAT EVIDENCE IDS ACTUALLY EXIST
+    # ========================================================
+
+    valid_evidence_ids = {item.id for item in evidence}
+
+    invalid_supporting = (set(supporting_ids) - valid_evidence_ids)
+
+    invalid_contradicting = (set(contradicting_ids) - valid_evidence_ids)
+
+    if invalid_supporting:
+        raise ValueError(
+            "Invalid supporting evidence IDs: "
+            f"{sorted(invalid_supporting)}"
+        )
+
+    if invalid_contradicting:
+        raise ValueError(
+            "Invalid contradicting evidence IDs: "
+            f"{sorted(invalid_contradicting)}"
+        )
+
+    # ========================================================
+    # SAME EVIDENCE CANNOT SUPPORT AND CONTRADICT
+    # ========================================================
+
+    overlapping_ids = (set(supporting_ids) & set(contradicting_ids))
+
+    if overlapping_ids:
+        raise ValueError(
+            "Evidence IDs cannot be both supporting "
+            "and contradicting: "
+            f"{sorted(overlapping_ids)}"
+        )
+
+    # ========================================================
+    # VERDICT ↔ EVIDENCE CONSISTENCY
+    # ========================================================
+
+    if (verdict == "SUPPORTED" and not supporting_ids):
+        raise ValueError(
+            "SUPPORTED verdict requires at least one "
+            "supporting evidence ID."
+        )
+
+    if (verdict == "REFUTED" and not contradicting_ids):
+        raise ValueError(
+            "REFUTED verdict requires at least one "
+            "contradicting evidence ID."
+        )
+
+    # ========================================================
+    # EXPLANATION
+    # ========================================================
+
+    explanation = data.get("explanation", "")
+
+    if ( not isinstance(explanation, str)or not explanation.strip()):
+        raise ValueError("Verification explanation cannot be empty.")
+
+    # ========================================================
+    # RETURN CLEAN DATA
+    # ========================================================
+
+    return {
+        "verdict": verdict,
+        "confidence": float(confidence),
+        "supporting_evidence_ids": supporting_ids,
+        "contradicting_evidence_ids": contradicting_ids,
+        "explanation": explanation.strip()
+    }
+
 # ============================================================
 # CALL VERIFICATION MODEL
 # ============================================================
@@ -226,13 +440,15 @@ def call_verification_model(claim: str, evidence: List[Evidence]) -> Verificatio
     text = text.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
 
     data = json.loads(text)
+
+    validated_data = validate_verification_output(data=data, evidence=evidence)
     
     return VerificationResult(
-        verdict=data["verdict"],
-        explanation=data["explanation"],
-        supporting_evidence_ids=data.get("supporting_evidence_ids", []),
-        contradicting_evidence_ids=data.get("contradicting_evidence_ids", []),
-        confidence=data.get("confidence"),
+        verdict=validated_data["verdict"],
+        explanation=validated_data["explanation"],
+        supporting_evidence_ids=validated_data.get("supporting_evidence_ids", []),
+        contradicting_evidence_ids=validated_data.get("contradicting_evidence_ids", []),
+        confidence=validated_data.get("confidence"),
     )
 
 def verify_subclaims(subclaims, evidence):
