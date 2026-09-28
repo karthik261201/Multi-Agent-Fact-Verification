@@ -212,7 +212,8 @@ def run_agentic_orchestrator(user_claim: str):
 
         evidence_result = retrieve_evidence(
             claim=analysis.original_claim,
-            search_queries=search_queries
+            search_queries=search_queries,
+            subclaims=analysis.subclaims
         )
 
         evidence_count = len(evidence_result["evidence"])
