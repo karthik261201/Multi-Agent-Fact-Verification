@@ -25,7 +25,7 @@ from pydantic import BaseModel
 
 from src.agents.claim_agent import analyze_claim
 from src.agents.evidence_agent import retrieve_evidence
-from src.agents.verification_agent import (prepare_evidence, call_verification_model)
+from src.agents.verification_agent import (prepare_evidence, verify_claim_by_subclaims)
 
 # Maximum number of evidence retrieval attempts.
 MAX_RETRIES = 2
@@ -315,10 +315,41 @@ def run_agentic_orchestrator(user_claim: str):
 
         print("\n========== VERIFICATION AGENT ==========")
 
-        verification_result = call_verification_model(
-            claim=analysis.original_claim,
+        verification_result = verify_claim_by_subclaims(
+            subclaims=analysis.subclaims,
             evidence=verification_evidence
         )
+
+        print("\nSubclaim Verification Results:")
+
+        for result in verification_result.subclaim_results:
+
+            print(
+                f"\n{result.subclaim_id}: "
+                f"{result.subclaim_text}"
+            )
+
+            print(
+                f"Verdict: {result.verdict}"
+            )
+
+            print(
+                f"Confidence: {result.confidence}"
+            )
+
+            print(
+                "Supporting Evidence:",
+                result.supporting_evidence_ids
+            )
+
+            print(
+                "Contradicting Evidence:",
+                result.contradicting_evidence_ids
+            )
+
+            print(
+                f"Explanation: {result.explanation}"
+            )
 
         print("Verdict:", verification_result.verdict)
 

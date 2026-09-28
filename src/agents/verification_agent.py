@@ -57,6 +57,33 @@ class VerificationResult:
     contradicting_evidence_ids: List[int] = field(default_factory=list)
     confidence: Optional[float] = None
 
+@dataclass
+class SubclaimVerificationResult:
+    """
+    Stores the verification result for one individual subclaim.
+    """
+    subclaim_id: str
+    subclaim_text: str
+    verdict: str
+    explanation: str
+    supporting_evidence_ids: List[int] = field(default_factory=list)
+    contradicting_evidence_ids: List[int] = field(default_factory=list)
+    confidence: Optional[float] = None
+
+@dataclass
+class OverallVerificationResult:
+    """
+    Final verification result containing both:
+    - individual subclaim results
+    - overall claim verdict
+    """
+    verdict: str
+    explanation: str
+    subclaim_results: List[SubclaimVerificationResult] = field(default_factory=list)
+    supporting_evidence_ids: List[int] = field(default_factory=list)
+    contradicting_evidence_ids: List[int] = field(default_factory=list)
+    confidence: Optional[float] = None
+
 # ============================================================
 # EVIDENCE CONVERSION
 # ============================================================
@@ -207,3 +234,170 @@ def call_verification_model(claim: str, evidence: List[Evidence]) -> Verificatio
         contradicting_evidence_ids=data.get("contradicting_evidence_ids", []),
         confidence=data.get("confidence"),
     )
+
+def verify_subclaims(subclaims, evidence):
+    """
+    Verify each subclaim independently using only the
+    evidence retrieved for that specific subclaim.
+
+    This prevents evidence belonging to one subclaim from
+    incorrectly influencing another subclaim.
+    """
+
+    results = []
+
+    for subclaim in subclaims:
+
+        # ====================================================
+        # GET EVIDENCE FOR THIS SUBCLAIM
+        # ====================================================
+
+        subclaim_evidence = [item for item in evidence if item.subclaim_id == subclaim.id]
+
+        print(
+            f"\nVerifying {subclaim.id}: "
+            f"{subclaim.text}"
+        )
+
+        print(
+            f"Evidence available: "
+            f"{len(subclaim_evidence)}"
+        )
+
+        # ====================================================
+        # VERIFY THIS SUBCLAIM
+        # ====================================================
+
+        result = call_verification_model(claim=subclaim.text, evidence=subclaim_evidence)
+
+        # ====================================================
+        # STORE RESULT
+        # ====================================================
+
+        results.append(
+            SubclaimVerificationResult(
+                subclaim_id=subclaim.id,
+                subclaim_text=subclaim.text,
+                verdict=result.verdict,
+                explanation=result.explanation,
+                supporting_evidence_ids=(result.supporting_evidence_ids),
+                contradicting_evidence_ids=(result.contradicting_evidence_ids),
+                confidence=result.confidence
+            )
+        )
+
+    return results
+
+def aggregate_subclaim_results(subclaim_results):
+    """
+    Combine individual subclaim verdicts into the final claim-level verdict.
+
+    Rules:
+
+    1. If ANY subclaim is REFUTED: overall = REFUTED
+
+    2. If ALL subclaims are SUPPORTED: overall = SUPPORTED
+
+    3. Otherwise: overall = INSUFFICIENT
+
+    The aggregation itself is deterministic and does not
+    require another LLM call.
+    """
+
+    if not subclaim_results:
+        return OverallVerificationResult(
+            verdict="INSUFFICIENT",
+            confidence=0.0,
+            explanation=("No subclaims were available for verification."),
+            subclaim_results=[]
+        )
+
+    verdicts = [result.verdict for result in subclaim_results]
+
+    # ========================================================
+    # DETERMINE OVERALL VERDICT
+    # ========================================================
+
+    if "REFUTED" in verdicts:
+        overall_verdict = "REFUTED"
+
+    elif all(verdict == "SUPPORTED" for verdict in verdicts):
+        overall_verdict = "SUPPORTED"
+
+    else:
+        overall_verdict = "INSUFFICIENT"
+
+    # ========================================================
+    # COLLECT EVIDENCE IDS
+    # ========================================================
+
+    supporting_ids = sorted(
+        {
+            evidence_id
+            for result in subclaim_results
+            for evidence_id
+            in result.supporting_evidence_ids
+        }
+    )
+
+    contradicting_ids = sorted(
+        {
+            evidence_id
+            for result in subclaim_results
+            for evidence_id
+            in result.contradicting_evidence_ids
+        }
+    )
+
+    # ========================================================
+    # CALCULATE SIMPLE OVERALL CONFIDENCE
+    # ========================================================
+
+    confidences = [
+        result.confidence
+        for result in subclaim_results
+        if result.confidence is not None
+    ]
+
+    overall_confidence = (
+        sum(confidences) / len(confidences)
+        if confidences
+        else None
+    )
+
+    # ========================================================
+    # BUILD EXPLANATION
+    # ========================================================
+
+    explanation_parts = []
+
+    for result in subclaim_results:
+        explanation_parts.append(
+            f"{result.subclaim_id} "
+            f"({result.verdict}): "
+            f"{result.explanation}"
+        )
+
+    overall_explanation = " ".join(explanation_parts)
+
+    return OverallVerificationResult(
+        verdict=overall_verdict,
+        confidence=overall_confidence,
+        explanation=overall_explanation,
+        subclaim_results=subclaim_results,
+        supporting_evidence_ids=supporting_ids,
+        contradicting_evidence_ids=contradicting_ids
+    )
+
+def verify_claim_by_subclaims(subclaims, evidence):
+    """
+    Complete Verification Agent workflow:
+
+    1. Verify every subclaim independently.
+    2. Aggregate subclaim results.
+    3. Return the final claim-level result.
+    """
+
+    subclaim_results = verify_subclaims(subclaims=subclaims, evidence=evidence)
+
+    return aggregate_subclaim_results(subclaim_results)
