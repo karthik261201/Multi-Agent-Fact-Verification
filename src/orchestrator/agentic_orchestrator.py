@@ -300,6 +300,15 @@ def run_agentic_orchestrator(user_claim: str):
 
         verification_evidence = prepare_evidence(evidence_result["evidence"])
 
+        print("\nEvidence received by Verification Agent:")
+
+        for item in verification_evidence:
+            print(
+                f"Evidence {item.id} | "
+                f"Subclaim: {item.subclaim_id} | "
+                f"Query: {item.query}"
+            )
+
         # ----------------------------------------------------
         # CALL VERIFICATION AGENT
         # ----------------------------------------------------
