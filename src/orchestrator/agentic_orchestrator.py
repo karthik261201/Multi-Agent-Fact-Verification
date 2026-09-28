@@ -234,10 +234,9 @@ def run_agentic_orchestrator(user_claim: str):
         for index, item in enumerate(evidence_result["evidence"], start=1):
             print(
                 f"[{index}] "
-                f"Subclaim: "
-                f"{item.get('subclaim_id')} | "
-                f"Query: "
-                f"{item.get('query')}"
+                f"Subclaim: {item.get('subclaim_id')} | "
+                f"Query: {item.get('query')} | "
+                f"URL: {item.get('url')}"
             )
 
         # ====================================================

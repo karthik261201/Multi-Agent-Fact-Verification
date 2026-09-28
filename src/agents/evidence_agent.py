@@ -5,6 +5,60 @@ from src.retrieval.content_extractor import extract_content
 from src.retrieval.text_chunker import chunk_text
 from src.retrieval.evidence_ranker import rank_evidence
 
+def select_diverse_evidence(ranked_evidence, top_k=3):
+    """
+    Select the highest-ranked evidence while preferring
+    different source URLs.
+
+    This prevents multiple chunks from the same webpage
+    from occupying all evidence positions for a subclaim.
+    """
+
+    selected = []
+    seen_urls = set()
+
+    # --------------------------------------------------------
+    # FIRST PASS:
+    # Prefer evidence from unique URLs.
+    # --------------------------------------------------------
+
+    for evidence in ranked_evidence:
+
+        url = evidence.get("url")
+
+        # Skip another passage from a URL that we have
+        # already selected.
+        if url and url in seen_urls:
+            continue
+
+        selected.append(evidence)
+
+        if url:
+            seen_urls.add(url)
+
+        # Stop once enough diverse evidence is collected.
+        if len(selected) >= top_k:
+            return selected
+
+    # --------------------------------------------------------
+    # SECOND PASS:
+    # If there were not enough unique sources, allow another
+    # passage from an already-used URL.
+    #
+    # This is better than returning too little evidence.
+    # --------------------------------------------------------
+
+    for evidence in ranked_evidence:
+        # Don't add the exact same evidence object twice.
+        if evidence in selected:
+            continue
+
+        selected.append(evidence)
+
+        if len(selected) >= top_k:
+            break
+
+    return selected
 
 def retrieve_evidence(claim, search_queries, subclaims=None, max_results_per_query=3, top_k_per_subclaim=3):
     """
@@ -169,12 +223,16 @@ def retrieve_evidence(claim, search_queries, subclaims=None, max_results_per_que
                 if not subclaim_passages:
                     continue
 
-                # IMPORTANT:
-                #
-                # Rank against the SUBCLAIM,
-                # not the complete original claim.
-                ranked = rank_evidence(subclaim_text, subclaim_passages,top_k=top_k_per_subclaim)
-                final_evidence.extend(ranked)
+                # Rank a larger candidate pool first.
+                # If we ranked only the top 3 immediately, those 3 could
+                # all come from the same webpage and we would have no
+                # alternative sources available for diversification.
+                candidate_pool_size = max(top_k_per_subclaim * 4, 10)
+                ranked_candidates = rank_evidence(subclaim_text, subclaim_passages, top_k=candidate_pool_size)
+
+                # Prefer evidence from different source URLs.
+                diverse_evidence = select_diverse_evidence(ranked_candidates, top_k=top_k_per_subclaim)
+                final_evidence.extend(diverse_evidence)
 
         # ========================================================
         # FALLBACK FOR PLAIN STRING QUERIES
@@ -185,7 +243,9 @@ def retrieve_evidence(claim, search_queries, subclaims=None, max_results_per_que
             #
             # Therefore we temporarily keep the old global-ranking
             # behaviour for those queries.
-            final_evidence = rank_evidence(claim, all_passages, top_k=top_k_per_subclaim)
+            candidate_pool_size = max(top_k_per_subclaim * 4,10)
+            ranked_candidates = rank_evidence(claim, all_passages, top_k=candidate_pool_size)
+            final_evidence = select_diverse_evidence(ranked_candidates, top_k=top_k_per_subclaim)
 
     # ========================================================
     # RETURN
