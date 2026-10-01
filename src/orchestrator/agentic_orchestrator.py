@@ -25,7 +25,7 @@ from pydantic import BaseModel
 
 from src.agents.claim_agent import analyze_claim
 from src.agents.evidence_agent import retrieve_evidence
-from src.agents.verification_agent import (prepare_evidence, verify_claim_by_subclaims)
+from src.agents.verification_agent import (prepare_evidence, verify_claim_by_subclaims, aggregate_subclaim_results)
 
 # Maximum number of evidence retrieval attempts.
 MAX_RETRIES = 2
@@ -41,6 +41,20 @@ class RetrySearchQuery(BaseModel):
 
     subclaim_id: str
     query: str
+
+def get_insufficient_subclaim_ids(verification_result):
+    """
+    Return the IDs of subclaims that could not be
+    verified with the currently available evidence.
+
+    Only these subclaims need another retrieval attempt.
+    """
+
+    return [
+        result.subclaim_id
+        for result in verification_result.subclaim_results
+        if result.verdict == "INSUFFICIENT"
+    ]
 
 # ============================================================
 # RETRY QUERY GENERATION
@@ -250,6 +264,15 @@ def run_agentic_orchestrator(user_claim: str):
     evidence_result = None
     verification_result = None
 
+    # Attempt 1 starts with all subclaims.
+    current_subclaims = analysis.subclaims
+
+    # Preserve resolved subclaim results across retries.
+    resolved_subclaim_results = {}
+
+    # Evidence IDs must remain unique across attempts.
+    next_evidence_id = 1
+
     # ========================================================
     # STEP 4: AGENTIC RETRY LOOP
     # ========================================================
@@ -268,7 +291,7 @@ def run_agentic_orchestrator(user_claim: str):
         evidence_result = retrieve_evidence(
             claim=analysis.original_claim,
             search_queries=search_queries,
-            subclaims=analysis.subclaims
+            subclaims=current_subclaims
         )
 
         evidence_count = len(evidence_result["evidence"])
@@ -298,7 +321,9 @@ def run_agentic_orchestrator(user_claim: str):
         # PREPARE EVIDENCE FOR VERIFICATION AGENT
         # ====================================================
 
-        verification_evidence = prepare_evidence(evidence_result["evidence"])
+        verification_evidence = prepare_evidence(evidence_result["evidence"], start_id=next_evidence_id)
+
+        next_evidence_id += len(verification_evidence)
 
         print("\nEvidence received by Verification Agent:")
 
@@ -315,10 +340,61 @@ def run_agentic_orchestrator(user_claim: str):
 
         print("\n========== VERIFICATION AGENT ==========")
 
-        verification_result = verify_claim_by_subclaims(
-            subclaims=analysis.subclaims,
-            evidence=verification_evidence
-        )
+        # ====================================================
+        # VERIFY ONLY THE SUBCLAIMS FOR THIS ATTEMPT
+        # ====================================================
+
+        current_verification_result = verify_claim_by_subclaims(subclaims=current_subclaims, evidence=verification_evidence)
+
+        # ====================================================
+        # PRESERVE RESOLVED SUBCLAIMS
+        # ====================================================
+        #
+        # If a subclaim has already reached SUPPORTED or
+        # REFUTED, we keep that result for later attempts.
+        #
+        # Example:
+        #
+        # Attempt 1:
+        #   c1 -> SUPPORTED
+        #   c2 -> INSUFFICIENT
+        #
+        # c1 is stored here while c2 is retried.
+
+        for result in current_verification_result.subclaim_results:
+            if result.verdict in {"SUPPORTED","REFUTED"}:
+                resolved_subclaim_results[result.subclaim_id] = result
+
+        # ====================================================
+        # COMBINE OLD RESULTS WITH CURRENT RESULTS
+        # ====================================================
+        #
+        # Start with subclaims that were already resolved
+        # during previous attempts.
+
+        combined_results = dict(resolved_subclaim_results)
+
+        # Add/replace the results produced during the
+        # current attempt.
+        #
+        # This also keeps INSUFFICIENT results so that the
+        # orchestrator knows which subclaims still need work.
+
+        for result in current_verification_result.subclaim_results:
+            combined_results[result.subclaim_id] = result
+
+        # ====================================================
+        # RECALCULATE THE OVERALL CLAIM VERDICT
+        # ====================================================
+        #
+        # Example after retry:
+        #
+        # preserved c1 -> SUPPORTED
+        # new c2       -> INSUFFICIENT
+        #
+        # Overall      -> INSUFFICIENT
+
+        verification_result = aggregate_subclaim_results(list(combined_results.values()))
 
         print("\nSubclaim Verification Results:")
 
@@ -379,6 +455,10 @@ def run_agentic_orchestrator(user_claim: str):
         # INSUFFICIENT EVIDENCE
         # ----------------------------------------------------
 
+        insufficient_subclaim_ids = (get_insufficient_subclaim_ids(verification_result))
+
+        print("\nSubclaims requiring more evidence:",insufficient_subclaim_ids)
+
         if verification_result.verdict == "INSUFFICIENT":
 
             # If another attempt is available, retry.
@@ -411,13 +491,21 @@ def run_agentic_orchestrator(user_claim: str):
                     for search in search_queries
                 ]
 
+                insufficient_subclaims = [
+                    subclaim
+                    for subclaim in analysis.subclaims
+                    if subclaim.id in insufficient_subclaim_ids
+                ]
+
+                current_subclaims = insufficient_subclaims
+
                 # --------------------------------------------
                 # GENERATE IMPROVED QUERIES
                 # --------------------------------------------
 
                 new_queries = generate_retry_queries(
                     claim=analysis.original_claim,
-                    subclaims=analysis.subclaims,
+                    subclaims=insufficient_subclaims,
                     previous_queries=previous_query_strings,
                     verification_explanation=(verification_result.explanation)
                 )

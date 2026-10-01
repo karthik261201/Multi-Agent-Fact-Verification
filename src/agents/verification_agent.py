@@ -88,7 +88,7 @@ class OverallVerificationResult:
 # EVIDENCE CONVERSION
 # ============================================================
 
-def prepare_evidence(evidence_items):
+def prepare_evidence(evidence_items, start_id=1):
     """
     Convert Evidence Agent dictionaries into Evidence
     objects used by the Verification Agent.
@@ -99,7 +99,7 @@ def prepare_evidence(evidence_items):
 
     evidence = []
 
-    for index, item in enumerate(evidence_items, start=1):
+    for index, item in enumerate(evidence_items, start=start_id):
         evidence.append(
             Evidence(
                 id=index,
