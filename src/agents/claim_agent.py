@@ -1,9 +1,8 @@
 import json
-
 import requests
 
+from pydantic import ValidationError
 from src.schemas.claim_analysis import ClaimAnalysis
-
 
 # Instructions that define the Claim Agent's responsibility.
 SYSTEM_PROMPT = """
@@ -385,7 +384,10 @@ Before returning the JSON, internally check:
 def analyze_claim(claim: str) -> ClaimAnalysis:
     """Analyze a claim and return a validated ClaimAnalysis object."""
 
-    # Check the input before sending it to the model.
+    # ====================================================
+    # INPUT VALIDATION
+    # ====================================================
+
     if not isinstance(claim, str) or not claim.strip():
         raise ValueError("Please enter a nonempty claim.")
 
@@ -420,29 +422,63 @@ def analyze_claim(claim: str) -> ClaimAnalysis:
         },
     }
 
-    # Send the request to Ollama on your computer.
-    response = requests.post(
-        "http://localhost:11434/api/chat",
-        json=payload,
-        timeout=180,
-    )
-    response.raise_for_status()
+    # ====================================================
+    # OLLAMA REQUEST
+    # ====================================================
 
-    # Read the API response.
-    data = response.json()
-
-    if data.get("done_reason") == "length":
-        raise ValueError(
-            "The model's answer was cut short. Try a shorter claim."
+    try:
+        response = requests.post(
+            "http://localhost:11434/api/chat",
+            json=payload,
+            timeout=180,
         )
+        response.raise_for_status()
 
-    model_answer = data["message"]["content"]
+    except requests.exceptions.Timeout:
+        raise RuntimeError("Claim Agent failed: Ollama request timed out.")
 
-    # Parse and validate the response, including the keywords field.
-    analysis = ClaimAnalysis.model_validate_json(model_answer)
+    except requests.exceptions.ConnectionError:
+        raise RuntimeError("Claim Agent failed: Could not connect to Ollama.")
+
+    except requests.exceptions.RequestException as e:
+        raise RuntimeError(f"Claim Agent failed: Ollama request error: {e}")
+
+    # ====================================================
+    # OLLAMA RESPONSE VALIDATION
+    # ====================================================
+
+    try:
+        data = response.json()
+
+        if data.get("done_reason") == "length":
+            raise RuntimeError(
+                "Claim Agent failed: The model's answer was cut short."
+                "Try a shorter claim."
+            )
+
+        model_answer = data["message"]["content"]
+
+    except (ValueError, KeyError, TypeError) as e:
+        raise RuntimeError(f"Claim Agent failed: Invalid response from Ollama: {e}")
+
+    # ====================================================
+    # STRUCTURED OUTPUT VALIDATION
+    # ====================================================
+
+    try:
+        analysis = ClaimAnalysis.model_validate_json(model_answer)
+
+    except ValidationError as e:
+        raise RuntimeError("Claim Agent failed: "
+            f"LLM returned invalid structured output: {e}"
+        )
 
     # Preserve the user's exact input.
     analysis.original_claim = claim
+
+    # ====================================================
+    # LOGICAL VALIDATION
+    # ====================================================
 
     # Check that subclaim IDs are unique.
     subclaim_ids = [item.id for item in analysis.subclaims]
@@ -453,21 +489,15 @@ def analyze_claim(claim: str) -> ClaimAnalysis:
     # Check that every search refers to an existing subclaim.
     for search in analysis.search_queries:
         if search.subclaim_id not in subclaim_ids:
-            raise ValueError(
-                "A search query refers to an unknown subclaim."
-            )
+            raise ValueError("A search query refers to an unknown subclaim.")
 
     # A ready analysis needs assertions and searches.
     if analysis.status == "ready":
         if not analysis.subclaims or not analysis.search_queries:
-            raise ValueError(
-                "A ready analysis must include subclaims and searches."
-            )
+            raise ValueError("A ready analysis must include subclaims and searches.")
 
     # An unclear claim must include an explanation of what is missing.
-    if analysis.status == "needs_clarification" and not analysis.ambiguities:
-        raise ValueError(
-            "The model must explain what needs clarification."
-        )
+    if (analysis.status == "needs_clarification" and not analysis.ambiguities):
+        raise ValueError("The model must explain what needs clarification.")
 
     return analysis

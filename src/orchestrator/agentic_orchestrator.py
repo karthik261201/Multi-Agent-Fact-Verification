@@ -68,7 +68,19 @@ def generate_retry_queries(claim, subclaims, previous_queries, verification_expl
     Each generated query must be linked to a valid subclaim.
     """
 
-    client = Groq()
+    # --------------------------------------------------------
+    # CREATE GROQ CLIENT
+    # --------------------------------------------------------
+
+    try:
+        client = Groq()
+
+    except Exception as e:
+        print(
+            f"Warning: Could not initialize Groq client "
+            f"for retry generation: {e}"
+        )
+        return []
 
     # --------------------------------------------------------
     # PREPARE SUBCLAIMS FOR THE LLM
@@ -133,17 +145,44 @@ def generate_retry_queries(claim, subclaims, previous_queries, verification_expl
         }}
     """
 
-    response = client.chat.completions.create(
-        model="openai/gpt-oss-120b",
-        temperature=0,
-        max_tokens=500,
-        messages=[
-            {"role": "user", "content": prompt}
-        ]
-    )
+    # --------------------------------------------------------
+    # CALL GROQ
+    # --------------------------------------------------------
 
-    # Read the model response.
-    text = response.choices[0].message.content.strip()
+    # Retry-query generation is helpful, but it should not
+    # crash the complete verification workflow if Groq fails.
+    try:
+        response = client.chat.completions.create(
+            model="openai/gpt-oss-120b",
+            temperature=0,
+            max_tokens=500,
+            messages=[
+                {"role": "user", "content": prompt}
+            ]
+        )
+
+    except Exception as e:
+        print(
+            f"Warning: Retry query generation failed: {e}"
+        )
+        return []
+
+    # --------------------------------------------------------
+    # READ MODEL RESPONSE
+    # --------------------------------------------------------
+
+    try:
+        text = response.choices[0].message.content
+
+        if not text:
+            print("Warning: Retry query generator returned an empty response.")
+            return []
+
+        text = text.strip()
+
+    except (AttributeError, IndexError, TypeError) as e:
+        print(f"Warning: Invalid retry-query response: {e}")
+        return []
 
     # Remove Markdown code fences if the model adds them.
     if text.startswith("```"):
@@ -152,10 +191,26 @@ def generate_retry_queries(claim, subclaims, previous_queries, verification_expl
         if text.startswith("json"):
             text = text[4:].strip()
 
-    # Convert the JSON response into a Python dictionary.
-    data = json.loads(text)
+    # --------------------------------------------------------
+    # PARSE JSON
+    # --------------------------------------------------------
+
+    try:
+        data = json.loads(text)
+
+    except json.JSONDecodeError as e:
+        print(
+            f"Warning: Retry query generator returned "
+            f"invalid JSON: {e}"
+        )
+        return []
 
     raw_queries = data.get("queries", [])
+
+    # Make sure "queries" is actually a list.
+    if not isinstance(raw_queries, list):
+        print("Warning: Retry query generator returned an invalid queries structure.")
+        return []
 
     # --------------------------------------------------------
     # VALIDATE SUBCLAIM IDs
@@ -167,8 +222,18 @@ def generate_retry_queries(claim, subclaims, previous_queries, verification_expl
 
     for item in raw_queries:
 
+        # Ignore malformed query entries.
+        if not isinstance(item, dict):
+            continue
+
         subclaim_id = item.get("subclaim_id")
-        query = item.get("query", "").strip()
+        query = item.get("query", "")
+
+        # Make sure query is a string before calling strip().
+        if not isinstance(query, str):
+            continue
+
+        query = query.strip()
 
         # Ignore malformed queries.
         if not query:

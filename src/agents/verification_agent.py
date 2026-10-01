@@ -416,6 +416,13 @@ def validate_verification_output(data,evidence):
 # ============================================================
 
 def call_verification_model(claim: str, evidence: List[Evidence]) -> VerificationResult:
+    # ========================================================
+    # NO EVIDENCE
+    # ========================================================
+
+    # If no evidence was retrieved, there is no reason to
+    # call the LLM. The claim cannot be verified from the
+    # available evidence.
     if not evidence:
         return VerificationResult(
             verdict="INSUFFICIENT",
@@ -425,24 +432,98 @@ def call_verification_model(claim: str, evidence: List[Evidence]) -> Verificatio
             explanation="No evidence was retrieved for the claim."
         )
 
-    client = Groq()  # reads GROQ_API_KEY from env
+    # ========================================================
+    # CREATE GROQ CLIENT
+    # ========================================================
 
-    response = client.chat.completions.create(
-        model=MODEL,
-        max_tokens=1000,
-        messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": build_user_prompt(claim, evidence)},
-        ],
-    )
+    try:
+        client = Groq()  # reads GROQ_API_KEY from env
 
-    text = response.choices[0].message.content
-    text = text.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+    except Exception as e:
+        raise RuntimeError(
+            f"Verification Agent failed: "
+            f"Could not initialize Groq client: {e}"
+        )
 
-    data = json.loads(text)
+    # ========================================================
+    # CALL VERIFICATION MODEL
+    # ========================================================
 
-    validated_data = validate_verification_output(data=data, evidence=evidence)
-    
+    # The external API may fail because of connection issues,
+    # rate limits, authentication problems, or service errors.
+    try:
+        response = client.chat.completions.create(
+            model=MODEL,
+            max_tokens=1000,
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": build_user_prompt(claim, evidence)},
+            ],
+        )
+
+    except Exception as e:
+        raise RuntimeError(
+            f"Verification Agent failed: "
+            f"Groq API request error: {e}"
+        )
+
+    # ========================================================
+    # READ MODEL RESPONSE
+    # ========================================================
+
+    # Protect against an unexpected or incomplete response
+    # structure from the external API.
+    try:
+        text = response.choices[0].message.content
+
+        if not text:
+            raise ValueError("Model returned an empty response.")
+
+    except (AttributeError, IndexError, TypeError, ValueError) as e:
+        raise RuntimeError(
+            f"Verification Agent failed: "
+            f"Invalid response from Groq: {e}"
+        )
+
+    # Remove Markdown code fences if the model adds them.
+    text = (text.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip())
+
+    # ========================================================
+    # PARSE MODEL JSON
+    # ========================================================
+
+    # The Verification Agent requires structured JSON.
+    # Convert malformed model output into a clear error
+    # instead of exposing a raw JSONDecodeError.
+    try:
+        data = json.loads(text)
+
+    except json.JSONDecodeError as e:
+        raise RuntimeError(
+            f"Verification Agent failed: "
+            f"Model returned invalid JSON: {e}"
+        )
+
+    # ========================================================
+    # VALIDATE MODEL OUTPUT
+    # ========================================================
+
+    # validate_verification_output() performs the existing
+    # deterministic checks for verdicts, confidence values,
+    # evidence IDs, explanations, and evidence consistency.
+    try:
+        validated_data = validate_verification_output(data=data, evidence=evidence)
+
+    except (ValueError, TypeError) as e:
+        raise RuntimeError(
+            f"Verification Agent failed: "
+            f"Invalid structured output: {e}"
+        )
+
+    # ========================================================
+    # RETURN VERIFIED RESULT
+    # ========================================================
+
     return VerificationResult(
         verdict=validated_data["verdict"],
         explanation=validated_data["explanation"],

@@ -129,6 +129,11 @@ def retrieve_evidence(claim, search_queries, subclaims=None, max_results_per_que
 
     all_passages = []
 
+    # Stores the final ranked evidence.
+    # Initializing it here allows the function to safely return
+    # even when no search queries or usable evidence are found.
+    final_evidence = []
+
     # ========================================================
     # PROCESS EACH SEARCH QUERY
     # ========================================================
@@ -159,7 +164,21 @@ def retrieve_evidence(claim, search_queries, subclaims=None, max_results_per_que
         # WEB SEARCH
         # ====================================================
 
-        search_results = search_web(query, max_results=max_results_per_query)
+        # ----------------------------------------------------
+        # ERROR HANDLING:
+        # If one web search fails, skip that query and allow
+        # the remaining search queries to continue.
+        # ----------------------------------------------------
+
+        try:
+            search_results = search_web(query, max_results=max_results_per_query)
+
+        except Exception as e:
+            print(
+                f"Warning: Web search failed for "
+                f"'{query}': {e}"
+            )
+            continue
 
         # ====================================================
         # PROCESS SEARCH RESULTS
@@ -167,19 +186,60 @@ def retrieve_evidence(claim, search_queries, subclaims=None, max_results_per_que
 
         for result in search_results:
 
-            url = result["url"]
+            # ------------------------------------------------
+            # ERROR HANDLING:
+            # Skip malformed search results that do not
+            # contain a usable URL.
+            # ------------------------------------------------
+
+            url = result.get("url")
+
+            if not url:
+                print("Warning: Search result did not contain a valid URL. Skipping.")
+                continue
 
             print(f"Reading: {url}")
 
             # Extract useful text from the webpage.
-            content = extract_content(url)
+
+            # ------------------------------------------------
+            # ERROR HANDLING:
+            # A webpage may be unavailable, blocked, or
+            # impossible to extract. Skip that page instead
+            # of stopping the entire Evidence Agent.
+            # ------------------------------------------------
+
+            try:
+                content = extract_content(url)
+
+            except Exception as e:
+                print(
+                    f"Warning: Could not extract content "
+                    f"from {url}: {e}"
+                )
+                continue
 
             # Skip pages where extraction failed.
             if not content:
                 continue
 
             # Split large webpage text into smaller passages.
-            chunks = chunk_text(content)
+
+            # ------------------------------------------------
+            # ERROR HANDLING:
+            # If extracted content cannot be chunked, skip
+            # that page and continue with other sources.
+            # ------------------------------------------------
+
+            try:
+                chunks = chunk_text(content)
+
+            except Exception as e:
+                print(
+                    f"Warning: Could not process content "
+                    f"from {url}: {e}"
+                )
+                continue
 
             # =================================================
             # STORE PASSAGES WITH PROVENANCE
@@ -199,10 +259,21 @@ def retrieve_evidence(claim, search_queries, subclaims=None, max_results_per_que
                     "text": chunk,
 
                     # Source information.
-                    "title": result["title"],
+                    "title": result.get("title", ""),
                     "url": url
                 })
-        
+
+        # ----------------------------------------------------
+        # ERROR HANDLING:
+        # If no usable passages have been retrieved yet,
+        # there is nothing available for ranking.
+        # Continue with the next search query.
+        # ----------------------------------------------------
+
+        if not all_passages:
+            print("Warning: No usable evidence passages were retrieved.")
+            continue
+
         # Check whether retrieved passages actually have
         # subclaim provenance.
         has_mapped_passages = any(passage.get("subclaim_id") is not None for passage in all_passages)
@@ -215,7 +286,7 @@ def retrieve_evidence(claim, search_queries, subclaims=None, max_results_per_que
         # If we have structured subclaim information,
         # rank evidence separately for each subclaim.
         if subclaim_lookup and has_mapped_passages:
-            for subclaim_id, subclaim_text in (subclaim_lookup.items()):
+            for subclaim_id, subclaim_text in subclaim_lookup.items():
                 # Select only evidence retrieved for this subclaim.
                 subclaim_passages = [passage for passage in all_passages if passage.get("subclaim_id") == subclaim_id]
 
@@ -250,6 +321,17 @@ def retrieve_evidence(claim, search_queries, subclaims=None, max_results_per_que
     # ========================================================
     # RETURN
     # ========================================================
+
+    # --------------------------------------------------------
+    # ERROR HANDLING:
+    # No evidence is a valid retrieval outcome.
+    # Return an empty evidence list instead of crashing.
+    # The Verification Agent / Orchestrator can then handle
+    # the case as insufficient evidence.
+    # --------------------------------------------------------
+
+    if not final_evidence:
+        print("Warning: Evidence Agent found no usable evidence.")
 
     return {
         "claim": claim,
